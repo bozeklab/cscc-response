@@ -1,0 +1,198 @@
+hydra:
+  run:
+    dir: outputs-and-checkpoints/train-fed/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: outputs-and-checkpoints/train-fed/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+    
+wandb_project: cscc-train-fed
+wandb_group: experiment_0
+accumulate_grad_batches: 1
+batch_size: 4
+csvs_root: /path/to/csvs
+epochs_per_round: 1
+num_rounds: 50
+trainer_0:
+  _target_: lightning.pytorch.Trainer
+  reload_dataloaders_every_n_epochs: 1
+  enable_checkpointing: true
+  max_epochs: ${epochs_per_round}
+  accelerator: gpu
+  precision: 16-mixed
+  strategy: auto
+  num_nodes: 1
+  devices: 1
+  callbacks: null
+  log_every_n_steps: 5
+dataloaders:
+  train:
+    cologne:
+      _target_: src.data.get_distributed_weighted_dataloader_from_csv
+      csv_file: ${csvs_root}/train_cgn.csv
+      fn_col: filename
+      lbl_col: label
+      sampling_col: center-and-label
+      transform:
+        _target_: src.data.unpickle_dict_and_get_value
+        _partial_: true
+        mode: rb
+        key: features
+      batch_size: ${batch_size}
+      num_workers: 1
+      collate_fn:
+        _target_: src.data.collate_and_pad
+        _partial_: true
+      pin_memory: true
+      persistent_workers: true
+      drop_last: false
+    bonn:
+      _target_: src.data.get_distributed_weighted_dataloader_from_csv
+      csv_file: ${csvs_root}/train_bonn.csv
+      fn_col: filename
+      lbl_col: label
+      sampling_col: center-and-label
+      transform:
+        _target_: src.data.unpickle_dict_and_get_value
+        _partial_: true
+        mode: rb
+        key: features
+      batch_size: ${batch_size}
+      num_workers: 1
+      collate_fn:
+        _target_: src.data.collate_and_pad
+        _partial_: true
+      pin_memory: true
+      persistent_workers: true
+      drop_last: false
+    munich:
+      _target_: src.data.get_distributed_weighted_dataloader_from_csv
+      csv_file: ${csvs_root}/train_munich.csv
+      fn_col: filename
+      lbl_col: label
+      sampling_col: center-and-label
+      transform:
+        _target_: src.data.unpickle_dict_and_get_value
+        _partial_: true
+        mode: rb
+        key: features
+      batch_size: ${batch_size}
+      num_workers: 1
+      collate_fn:
+        _target_: src.data.collate_and_pad
+        _partial_: true
+      pin_memory: true
+      persistent_workers: true
+      drop_last: false
+  val:
+    cologne:
+      _target_: torch.utils.data.DataLoader
+      dataset:
+        _target_: src.data.CSVDFDataset
+        csv_file: ${csvs_root}/val_cgn.csv
+        filter_func:
+          _target_: src.data.filter_fns
+          _partial_: true
+        transform:
+          _target_: src.data.unpickle_filename_and_keep_some_values
+          _partial_: true
+          cols_to_keep:
+          - label
+          - patID
+    bonn:
+      _target_: torch.utils.data.DataLoader
+      dataset:
+        _target_: src.data.CSVDFDataset
+        csv_file: ${csvs_root}/val_bonn.csv
+        filter_func:
+          _target_: src.data.filter_fns
+          _partial_: true
+        transform:
+          _target_: src.data.unpickle_filename_and_keep_some_values
+          _partial_: true
+          cols_to_keep:
+          - label
+          - patID
+    munich:
+      _target_: torch.utils.data.DataLoader
+      dataset:
+        _target_: src.data.CSVDFDataset
+        csv_file: ${csvs_root}/val_munich.csv
+        filter_func:
+          _target_: src.data.filter_fns
+          _partial_: true
+        transform:
+          _target_: src.data.unpickle_filename_and_keep_some_values
+          _partial_: true
+          cols_to_keep:
+          - label
+          - patID
+  test:
+    cologne:
+      _target_: torch.utils.data.DataLoader
+      dataset:
+        _target_: src.data.CSVDFDataset
+        csv_file: ${csvs_root}/test_cgn.csv
+        filter_func:
+          _target_: src.data.filter_fns
+          _partial_: true
+        transform:
+          _target_: src.data.unpickle_filename_and_keep_some_values
+          _partial_: true
+          cols_to_keep:
+          - label
+          - patID
+    bonn:
+      _target_: torch.utils.data.DataLoader
+      dataset:
+        _target_: src.data.CSVDFDataset
+        csv_file: ${csvs_root}/test_bonn.csv
+        filter_func:
+          _target_: src.data.filter_fns
+          _partial_: true
+        transform:
+          _target_: src.data.unpickle_filename_and_keep_some_values
+          _partial_: true
+          cols_to_keep:
+          - label
+          - patID
+    munich:
+      _target_: torch.utils.data.DataLoader
+      dataset:
+        _target_: src.data.CSVDFDataset
+        csv_file: ${csvs_root}/test_munich.csv
+        filter_func:
+          _target_: src.data.filter_fns
+          _partial_: true
+        transform:
+          _target_: src.data.unpickle_filename_and_keep_some_values
+          _partial_: true
+          cols_to_keep:
+          - label
+          - patID
+module_0:
+  _target_: src.models.LitModelFed
+  model:
+    _target_: src.models.AdaptedModelAvg
+    embed_dim: 768
+    num_classes: 2
+    seq_shortener:
+      _target_: src.models.SASequenceShortener
+      target_len: 256
+      embed_dim: 768
+      kdim: 1280
+      vdim: 1280
+      num_heads: 4
+      batch_first: true
+    model:
+      _target_: src.models.freeze_model
+      model:
+        _target_: transformers.AutoModel.from_pretrained
+        pretrained_model_name_or_path: roberta-base
+  optimizer_config:
+    optimizer:
+      _target_: torch.optim.Adam
+      _partial_: true
+      lr: 0.0001
+      weight_decay: 5.0e-05
+  loss_function:
+    _target_: torch.nn.CrossEntropyLoss

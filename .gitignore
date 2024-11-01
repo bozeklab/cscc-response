@@ -1,0 +1,6 @@
+**/__pycache__/
+bash-scripts/
+outputs-and-checkpoints/
+csvs/
+notebooks/
+configs/local/
