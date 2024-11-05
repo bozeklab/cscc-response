@@ -170,7 +170,7 @@ dataloaders:
           - label
           - patID
 module_0:
-  _target_: src.models.LitModelFed
+  _target_: src.models.LitModel
   model:
     _target_: src.models.AdaptedModelAvg
     embed_dim: 768

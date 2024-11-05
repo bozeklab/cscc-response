@@ -2,13 +2,9 @@ from lightning.pytorch import LightningModule
 from collections import OrderedDict
 import torch
 
-# in the current implementation metrics are calculated per gpu.
-# validation_step_end and test_step_end should be implemented to aggregate the outputs of each 
-# gpu that will be passed to validation_epoch_end and test_epoch_end.
-# see https://pytorch-lightning.readthedocs.io/en/stable/common/lightning_module.html
-class LitModelFed(LightningModule):
+class LitModel(LightningModule):
     def __init__(self, model=None, optimizer_config=None, loss_function=None, log_sync_dist=False, log_batch_size=None, keep_output_struct=False, val_step_metrics = [], val_epoch_metrics = [], test_step_metrics = [], test_epoch_metrics = []):
-        super(LitModelFed, self).__init__()
+        super(LitModel, self).__init__()
         self.model = model
         self.optimizer_config = optimizer_config
         self.loss_function = loss_function
@@ -18,14 +14,9 @@ class LitModelFed(LightningModule):
         self.val_epoch_metrics = val_epoch_metrics
         self.test_step_metrics = test_step_metrics
         self.test_epoch_metrics = test_epoch_metrics
-        self.keep_output_struct = keep_output_struct # some models output more than just logits, and a cross-entropy like loss function doesnt need that
-        # self.validation_step_outputs = []
-        # self.test_step_outputs = []
-        self.all_steps_labels_and_logits = []
-        self.all_steps_additional_inputs = []
-        self.all_steps_additional_outputs = []
+        self.keep_output_struct = keep_output_struct
+        self.reset_buffers()
         self.was_optim_config = False
-        
 
     def forward(self, x, *args, **kwargs):
         return self.model(x, *args, **kwargs)
@@ -72,8 +63,6 @@ class LitModelFed(LightningModule):
         metrics_dict = {}
         for metric_dict in step_metrics:
             metric_key, metric_func = list(metric_dict.items())[0]
-            # if dataloader_idx != 0:
-            #     metric_key += '/{}'.format(dataloader_idx)
             metric_value = metric_func(y_hat, y)
             metrics_dict[metric_key] = metric_value
         self.log_dict(metrics_dict, prog_bar=True, on_step=True, on_epoch=True, sync_dist=self.log_sync_dist, logger=True, batch_size=self.log_batch_size)
@@ -84,69 +73,38 @@ class LitModelFed(LightningModule):
         return labels_and_logits
 
     def _val_test_epoch_end_impl(self, steps_outputs, epoch_metrics, dataloader_idx=0):
-        # all_y_hat = torch.stack([x['y_hat'] for x in steps_outputs])
-        # all_y_hat = torch.flatten(all_y_hat,0,1) #1st dimension is # of forwards, 2nd dimension is batch size
-        # all_y = torch.stack([x['y'] for x in steps_outputs])
-        # all_y = torch.flatten(all_y)
-        # print(dataloader_idx)
         all_y_hat = torch.cat([x['y_hat'] for x in steps_outputs])
         all_y = torch.cat([x['y'] for x in steps_outputs])
         metrics_dict = {}
         for metric_dict in epoch_metrics:
             metric_key, metric_func = list(metric_dict.items())[0]
-            # if dataloader_idx != 0:
-            # for some reason, the dataloader_idx_{} suffix is not added automatically
             metric_key += '/{}'.format(dataloader_idx)
             metric_value = metric_func(all_y_hat, all_y)
             metrics_dict[metric_key] = metric_value
-        self.log_dict(metrics_dict, sync_dist=self.log_sync_dist, logger=True, add_dataloader_idx=True, batch_size=self.log_batch_size) #add_dataloader_idx=False: for some reason when set to True (default) the idx does not get added, so I do it myself some lines above
-        # return metrics_dict
+        self.log_dict(metrics_dict, sync_dist=self.log_sync_dist, logger=True, add_dataloader_idx=True, batch_size=self.log_batch_size) 
 
     def validation_step(self, batch, batch_nb, dataloader_idx=0):
         return self._val_test_step_impl(batch, batch_nb, self.val_step_metrics, dataloader_idx)
-        # metrics = self._val_test_step_impl(batch, batch_nb, self.val_step_metrics, dataloader_idx)
-        # self.validation_step_outputs.append(metrics)
-        # return metrics
         
     def test_step(self, batch, batch_nb, dataloader_idx=0):
-        # print(dataloader_idx)
         return self._val_test_step_impl(batch, batch_nb, self.test_step_metrics, dataloader_idx)
-        # metrics = self._val_test_step_impl(batch, batch_nb, self.test_step_metrics, dataloader_idx)
-        # self.test_step_outputs.append(metrics)
-        # return metrics
     
     def on_validation_epoch_end(self):
-        # breakpoint()
-        # for dl_idx in self.all_steps_labels_and_logits
         for dl_idx, dl_labels_and_logits in self.all_steps_labels_and_logits.items():
             self._val_test_epoch_end_impl(dl_labels_and_logits, self.val_epoch_metrics, dl_idx)
-        # if isinstance(self.all_steps_labels_and_logits[0], list):
-        #     for idx, labels_and_logits in enumerate(self.all_steps_labels_and_logits):
-        #        self._val_test_epoch_end_impl(dl_labels_and_logits, self.val_epoch_metrics, dl_idx)
-        # else:
-        #     self._val_test_epoch_end_impl(self.all_steps_labels_and_logits, self.val_epoch_metrics)
-        # self.all_steps_labels_and_logits = []
 
     def on_test_epoch_end(self):
-        # breakpoint()
         for dl_idx, dl_labels_and_logits in self.all_steps_labels_and_logits.items():
             self._val_test_epoch_end_impl(dl_labels_and_logits, self.test_epoch_metrics, dl_idx)
-        # if isinstance(self.all_steps_labels_and_logits[0], list):
-        #     for idx, labels_and_logits in enumerate(self.all_steps_labels_and_logits):
-        #         self._val_test_epoch_end_impl(labels_and_logits, self.test_epoch_metrics, idx)
-        # else:
-        #     self._val_test_epoch_end_impl(self.all_steps_labels_and_logits, self.test_epoch_metrics)
-        # self.all_steps_labels_and_logits = []
     
-    def on_validation_epoch_start(self):
+    def reset_buffers(self):
         self.current_dataloader = -1
         self.all_steps_labels_and_logits = {}
         self.all_steps_additional_inputs = {}
         self.all_steps_additional_outputs = {}
 
+    def on_validation_epoch_start(self):
+        self.reset_buffers()
+
     def on_test_epoch_start(self):
-        # breakpoint()
-        self.current_dataloader = -1
-        self.all_steps_labels_and_logits = {}
-        self.all_steps_additional_inputs = {}
-        self.all_steps_additional_outputs = {}
+        self.reset_buffers()

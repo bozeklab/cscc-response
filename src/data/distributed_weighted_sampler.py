@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader,Sampler
 import math
 import os
 from sklearn.utils.class_weight import compute_sample_weight
-from .csv_dataset import CSVDataset, CSVDFDataset
+from .csv_dataset import CSVDFDataset
 
 class DistributedWeightedSampler(Sampler):
     """
@@ -38,29 +38,9 @@ class DistributedWeightedSampler(Sampler):
     def set_epoch(self, epoch):
         self.epoch = epoch
 
-def get_distributed_weighted_dataloader_from_dataset(dataset, **dataloader_kwargs):
-    global_rank = int(gr) if (gr:=os.environ.get('SLURM_PROCID', None)) is not None else 0 #int(os.environ['SLURM_PROCID']) 
-    world_size = int(nt) if (nt:=os.environ.get('SLURM_NTASKS', None)) is not None else 1 #int(os.environ['SLURM_NTASKS'])
-    targets = dataset.targets
-    weights = compute_sample_weight('balanced', targets)
-    sampler = DistributedWeightedSampler(torch.tensor(weights), shuffle=True, num_replicas=world_size, rank=global_rank)
-    dataloader = DataLoader(dataset, sampler=sampler, **dataloader_kwargs)
-    return dataloader
-
-
-def get_distributed_weighted_dataloader_from_csv(csv_file, fn_col, lbl_col, sampling_col, transform=None, **dataloader_kwargs): #
-    global_rank = int(gr) if (gr:=os.environ.get('SLURM_PROCID', None)) is not None else 0 #int(os.environ['SLURM_PROCID']) 
-    world_size = int(nt) if (nt:=os.environ.get('SLURM_NTASKS', None)) is not None else 1 #int(os.environ['SLURM_NTASKS'])
-    dataset = CSVDataset(csv_file, fn_col, lbl_col, transform)
-    targets = dataset.df[sampling_col].values
-    weights = compute_sample_weight('balanced', targets)
-    sampler = DistributedWeightedSampler(torch.tensor(weights), shuffle=True, num_replicas=world_size, rank=global_rank)
-    dataloader = DataLoader(dataset, sampler=sampler, **dataloader_kwargs)
-    return dataloader
-
-def get_distributed_weighted_dataloader_from_csv_2(csv_file, sampling_col, filter_func, transform=None, **dataloader_kwargs): #
-    global_rank = int(gr) if (gr:=os.environ.get('SLURM_PROCID', None)) is not None else 0 #int(os.environ['SLURM_PROCID']) 
-    world_size = int(nt) if (nt:=os.environ.get('SLURM_NTASKS', None)) is not None else 1 #int(os.environ['SLURM_NTASKS'])
+def get_distributed_weighted_dataloader_from_csv(csv_file, sampling_col, filter_func, transform=None, **dataloader_kwargs): #
+    global_rank = int(gr) if (gr:=os.environ.get('SLURM_PROCID', None)) is not None else 0
+    world_size = int(nt) if (nt:=os.environ.get('SLURM_NTASKS', None)) is not None else 1
     dataset = CSVDFDataset(csv_file, filter_func, transform)
     targets = dataset.df[sampling_col].values
     weights = compute_sample_weight('balanced', targets)
