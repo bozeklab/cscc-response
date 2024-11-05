@@ -1,15 +1,16 @@
 hydra:
   run:
-    dir: outputs-and-checkpoints/train-fed/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: outputs-and-checkpoints/rerun-best-fed-slides/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
-    dir: outputs-and-checkpoints/train-fed/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: outputs-and-checkpoints/rerun-best-fed-slides/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
-    
-wandb_project: cscc-train-fed
+
+wandb_project: cscc-response
 wandb_group: experiment_0
+csvs_root: /path/to/csvs
+
 accumulate_grad_batches: 1
 batch_size: 4
-csvs_root: /path/to/csvs
 epochs_per_round: 1
 num_rounds: 50
 trainer_0:
@@ -22,21 +23,25 @@ trainer_0:
   strategy: auto
   num_nodes: 1
   devices: 1
-  callbacks: null
+  callbacks: 
+  - _target_: src.callbacks.SaveExtraIO
+    on_test: True
   log_every_n_steps: 5
 dataloaders:
   train:
     cologne:
       _target_: src.data.get_distributed_weighted_dataloader_from_csv
       csv_file: ${csvs_root}/train_cgn.csv
-      fn_col: filename
-      lbl_col: label
+      filter_func:
+        _target_: src.data.filter_fns
+        _partial_: true
       sampling_col: center-and-label
       transform:
-        _target_: src.data.unpickle_dict_and_get_value
+        _target_: src.data.process_row
         _partial_: true
-        mode: rb
-        key: features
+        keys:
+        - features
+        - label
       batch_size: ${batch_size}
       num_workers: 1
       collate_fn:
@@ -48,14 +53,16 @@ dataloaders:
     bonn:
       _target_: src.data.get_distributed_weighted_dataloader_from_csv
       csv_file: ${csvs_root}/train_bonn.csv
-      fn_col: filename
-      lbl_col: label
+      filter_func:
+        _target_: src.data.filter_fns
+        _partial_: true
       sampling_col: center-and-label
       transform:
-        _target_: src.data.unpickle_dict_and_get_value
+        _target_: src.data.process_row
         _partial_: true
-        mode: rb
-        key: features
+        keys:
+        - features
+        - label
       batch_size: ${batch_size}
       num_workers: 1
       collate_fn:
@@ -67,14 +74,16 @@ dataloaders:
     munich:
       _target_: src.data.get_distributed_weighted_dataloader_from_csv
       csv_file: ${csvs_root}/train_munich.csv
-      fn_col: filename
-      lbl_col: label
+      filter_func:
+        _target_: src.data.filter_fns
+        _partial_: true
       sampling_col: center-and-label
       transform:
-        _target_: src.data.unpickle_dict_and_get_value
+        _target_: src.data.process_row
         _partial_: true
-        mode: rb
-        key: features
+        keys:
+        - features
+        - label
       batch_size: ${batch_size}
       num_workers: 1
       collate_fn:
@@ -93,9 +102,10 @@ dataloaders:
           _target_: src.data.filter_fns
           _partial_: true
         transform:
-          _target_: src.data.unpickle_filename_and_keep_some_values
+          _target_: src.data.process_row
           _partial_: true
-          cols_to_keep:
+          keys:
+          - features
           - label
           - patID
     bonn:
@@ -107,9 +117,10 @@ dataloaders:
           _target_: src.data.filter_fns
           _partial_: true
         transform:
-          _target_: src.data.unpickle_filename_and_keep_some_values
+          _target_: src.data.process_row
           _partial_: true
-          cols_to_keep:
+          keys:
+          - features
           - label
           - patID
     munich:
@@ -121,9 +132,10 @@ dataloaders:
           _target_: src.data.filter_fns
           _partial_: true
         transform:
-          _target_: src.data.unpickle_filename_and_keep_some_values
+          _target_: src.data.process_row
           _partial_: true
-          cols_to_keep:
+          keys:
+          - features
           - label
           - patID
   test:
@@ -136,11 +148,14 @@ dataloaders:
           _target_: src.data.filter_fns
           _partial_: true
         transform:
-          _target_: src.data.unpickle_filename_and_keep_some_values
+          _target_: src.data.process_row
           _partial_: true
-          cols_to_keep:
+          keys:
+          - features
           - label
           - patID
+          - indices
+          - reduced_mask
     bonn:
       _target_: torch.utils.data.DataLoader
       dataset:
@@ -150,11 +165,14 @@ dataloaders:
           _target_: src.data.filter_fns
           _partial_: true
         transform:
-          _target_: src.data.unpickle_filename_and_keep_some_values
+          _target_: src.data.process_row
           _partial_: true
-          cols_to_keep:
+          keys:
+          - features
           - label
           - patID
+          - indices
+          - reduced_mask
     munich:
       _target_: torch.utils.data.DataLoader
       dataset:
@@ -164,11 +182,14 @@ dataloaders:
           _target_: src.data.filter_fns
           _partial_: true
         transform:
-          _target_: src.data.unpickle_filename_and_keep_some_values
+          _target_: src.data.process_row
           _partial_: true
-          cols_to_keep:
+          keys:
+          - features
           - label
           - patID
+          - indices
+          - reduced_mask
 module_0:
   _target_: src.models.LitModel
   model:
@@ -196,3 +217,20 @@ module_0:
       weight_decay: 5.0e-05
   loss_function:
     _target_: torch.nn.CrossEntropyLoss
+  val_step_metrics:
+  - val_loss:
+      _target_: torch.nn.functional.cross_entropy
+      _partial_: true
+  val_epoch_metrics:
+  - val_macro_auroc:
+      _target_: torchmetrics.functional.auroc
+      _partial_: true
+      task: multiclass
+      num_classes: 2
+  test_epoch_metrics:
+  - test_macro_auroc:
+      _target_: torchmetrics.functional.auroc
+      _partial_: true
+      average: macro
+      num_classes: 2
+      task: multiclass

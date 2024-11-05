@@ -117,8 +117,10 @@ def task(cfg):
         
         for module in lit_modules_list:
             set_parameters(module.model, params_avg)
-        
-    test_res = m0_trainer.test(m0, test_dls_list, ckpt_path='best_federated_model.ckpt')
+
+    checkpoint = torch.load('best_federated_model.ckpt')
+    m0.load_state_dict(checkpoint['state_dict'])    
+    test_res = m0_trainer.test(m0, test_dls_list)
     test_metrics_dict = compute_aggr_aurocs(m0, 'test')
     test_metrics_dict = {k: v.cpu() for k,v in test_metrics_dict.items()}
 
